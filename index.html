@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e6b5b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kartenmappe">
+<title>Kartenmappe</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <main>
+    <section id="view-scan" class="view view-scan" aria-label="Scannen">
+      <div class="cam" id="cam">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay"></canvas>
+        <div class="cam-msg" id="camMsg" hidden></div>
+      </div>
+      <div class="scan-ui">
+        <div class="chips" id="setChips" role="group" aria-label="Aktive Sets"></div>
+        <div class="scan-row">
+          <button class="chip foil" id="foilBtn" aria-pressed="false" title="Neu gescannte Karten als Foil vormerken">Foil</button>
+          <button class="btn primary scan-btn" id="scanBtn">Karte lesen</button>
+          <button class="chip" id="manualBtn" aria-pressed="false">Tippen</button>
+        </div>
+        <div class="manual" id="manualBox" hidden>
+          <input class="field" id="q" type="search" placeholder="Kartenname (deutsch oder englisch)" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+          <ul class="suggest" id="sugg"></ul>
+        </div>
+        <p class="status" id="status" aria-live="polite"></p>
+        <canvas id="thumb" class="thumbstrip" hidden></canvas>
+      </div>
+    </section>
+
+    <section id="view-coll" class="view" aria-label="Sammlung"><div class="pad" id="collBody"></div></section>
+    <section id="view-sets" class="view" aria-label="Sets und Einstellungen"><div class="pad" id="setsBody"></div></section>
+  </main>
+
+  <nav class="tabs" role="tablist" aria-label="Bereiche">
+    <button class="tab" role="tab" data-tab="scan" aria-selected="true">
+      <svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 12h8"/></svg>Scannen
+    </button>
+    <button class="tab" role="tab" data-tab="coll" aria-selected="false">
+      <svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>Sammlung
+    </button>
+    <button class="tab" role="tab" data-tab="sets" aria-selected="false">
+      <svg viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/></svg>Sets
+    </button>
+  </nav>
+</div>
+
+<div id="sheetHost"></div>
+<div id="toast" hidden></div>
+
+<script src="core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
