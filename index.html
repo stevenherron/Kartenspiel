@@ -24,20 +24,20 @@
         <video id="video" playsinline muted autoplay></video>
         <canvas id="overlay"></canvas>
         <div class="cam-msg" id="camMsg" hidden></div>
+        <div class="pill" id="status" aria-live="polite" hidden></div>
       </div>
       <div class="scan-ui">
         <div class="chips" id="setChips" role="group" aria-label="Aktive Sets"></div>
         <div class="scan-row">
           <button class="chip foil" id="foilBtn" aria-pressed="false" title="Neu gescannte Karten als Foil vormerken">Foil</button>
           <button class="btn primary scan-btn" id="scanBtn">Karte lesen</button>
+          <button class="chip" id="autoBtn" aria-pressed="true" title="Karte automatisch erkennen">Auto</button>
           <button class="chip" id="manualBtn" aria-pressed="false">Tippen</button>
         </div>
         <div class="manual" id="manualBox" hidden>
           <input class="field" id="q" type="search" placeholder="Kartenname (deutsch oder englisch)" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
           <ul class="suggest" id="sugg"></ul>
         </div>
-        <p class="status" id="status" aria-live="polite"></p>
-        <canvas id="thumb" class="thumbstrip" hidden></canvas>
       </div>
     </section>
 
@@ -56,10 +56,10 @@
       <svg viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/></svg>Sets
     </button>
   </nav>
+  <div id="checkHost" class="check" hidden></div>
+  <div id="sheetHost"></div>
+  <div id="toast" hidden></div>
 </div>
-
-<div id="sheetHost"></div>
-<div id="toast" hidden></div>
 
 <script src="core.js"></script>
 <script src="app.js"></script>

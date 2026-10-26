@@ -1,5 +1,5 @@
 /* Kartenmappe – App-Hülle offline verfügbar halten. Daten kommen aus IndexedDB, Preise von Scryfall. */
-const CACHE = 'kartenmappe-v1';
+const CACHE = 'kartenmappe-v2';
 const SHELL = ['./', 'index.html', 'style.css', 'core.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

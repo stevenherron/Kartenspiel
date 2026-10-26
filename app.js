@@ -79,7 +79,7 @@
   var S = {
     sets: [],            // {code, name, date, count, active, loadedAt}
     collection: {},      // "<cardId>|n|f" -> {id, foil, qty, cond, at}
-    settings: { cur: 'eur', multi: false, sort: 'value', foilMode: false },
+    settings: { cur: 'eur', multi: false, sort: 'value', foilMode: false, auto: true },
     history: []          // {d, v, cur, chg, n}
   };
   var CARDS = new Map(); // setcode -> schlanke Karten
@@ -322,11 +322,17 @@
     clearTimeout(toastT);
     toastT = setTimeout(function () { t.hidden = true; }, action ? 6000 : 3200);
   }
-  function openSheet(html) { $('#sheetHost').innerHTML = html; }
+  function openSheet(html) {
+    var host = $('#sheetHost');
+    var had = !!host.innerHTML;
+    host.innerHTML = html;
+    if (had) { var sh = host.querySelector('.sheet'); if (sh) sh.style.animation = 'none'; }
+  }
   function closeSheet() { $('#sheetHost').innerHTML = ''; R = null; E = null; }
 
   /* ---------- Tabs ---------- */
   function setTab(t) {
+    if (CK) closeCheck();
     tab = t;
     $$('.view').forEach(function (v) { v.classList.toggle('on', v.id === 'view-' + t); });
     $$('.tab').forEach(function (b) { b.setAttribute('aria-selected', b.dataset.tab === t ? 'true' : 'false'); });
@@ -337,7 +343,19 @@
   }
 
   /* ---------- Scannen: Oberfläche ---------- */
-  function setStatus(t) { $('#status').textContent = t || ''; }
+  var statusT = null;
+  function setStatus(t, ttl) {
+    var el = $('#status');
+    el.textContent = t || '';
+    el.hidden = !t;
+    clearTimeout(statusT);
+    if (t && ttl !== 0) statusT = setTimeout(function () { el.hidden = true; el.textContent = ''; }, ttl || 6000);
+  }
+  function readyHint() {
+    return S.settings.auto
+      ? 'Kartenname in den Kasten halten'
+      : 'Karte in den Rahmen halten, dann „Karte lesen“ tippen.';
+  }
   function renderScanUI() {
     var all = loadedSets();
     var act = activeSets();
@@ -349,6 +367,7 @@
     }).join('');
     $('#setChips').innerHTML = html;
     $('#foilBtn').setAttribute('aria-pressed', S.settings.foilMode ? 'true' : 'false');
+    $('#autoBtn').setAttribute('aria-pressed', S.settings.auto ? 'true' : 'false');
     var hasSets = act.length > 0;
     $('#scanBtn').disabled = !hasSets;
     var msg = $('#camMsg');
@@ -387,8 +406,8 @@
       camError = false;
       camMsg(null);
       drawOverlay();
-      setStatus('Karte in den Rahmen halten, dann „Karte lesen“ tippen.');
-      getWorker().then(function () { if (!busy) setStatus('Bereit. Karte in den Rahmen halten, dann „Karte lesen“ tippen.'); }).catch(function (e) { setStatus(e.message); });
+      setStatus(readyHint(), 5000);
+      getWorker().then(function () { if (!busy) setStatus(readyHint(), 5000); }).catch(function (e) { setStatus(e.message); });
     } catch (e) {
       camError = true;
       var denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
@@ -453,13 +472,13 @@
     if (!workerP) {
       workerP = (async function () {
         if (!window.Tesseract) {
-          setStatus('Texterkennung wird geladen …');
+          setStatus('Texterkennung wird geladen …', 0);
           await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
         }
         var w = await Tesseract.createWorker(['deu', 'eng'], 1, {
           logger: function (m) {
             if (m && m.status && m.status !== 'recognizing text' && typeof m.progress === 'number') {
-              setStatus('Texterkennung wird eingerichtet … ' + Math.round(m.progress * 100) + ' % (beim ersten Mal ca. 10 MB)');
+              setStatus('Texterkennung wird eingerichtet … ' + Math.round(m.progress * 100) + ' % (beim ersten Mal ca. 10 MB)', 0);
             }
           }
         });
@@ -479,8 +498,8 @@
     var v = Core.toVideoRect(Core.titleRegion(g), r.width, r.height, vw, vh);
     var sx = Math.max(0, v.sx), sy = Math.max(0, v.sy);
     var sw = Math.min(vw - sx, v.sw), sh = Math.min(vh - sy, v.sh);
-    var k = Math.max(1.5, Math.min(3, 1400 / sw));
-    var w = Math.max(240, Math.round(sw * k));
+    var k = Math.max(0.5, Math.min(2.5, 110 / sh));
+    var w = Math.max(200, Math.round(sw * k));
     var h = Math.max(40, Math.round(w * sh / sw));
     var pad = 14;
     var cv = document.createElement('canvas');
@@ -520,12 +539,21 @@
     ctx.putImageData(img, pad, pad);
     return cv;
   }
-  function showThumb(cv) {
-    var t = $('#thumb');
-    t.hidden = false;
-    t.height = 26;
-    t.width = Math.round(cv.width * 26 / cv.height);
-    t.getContext('2d').drawImage(cv, 0, 0, t.width, t.height);
+  var sigCv = null;
+  function captureSig() {
+    var vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    var r = cam.getBoundingClientRect();
+    var g = Core.guideRect(r.width, r.height);
+    var v = Core.toVideoRect(Core.titleRegion(g), r.width, r.height, vw, vh);
+    var sx = Math.max(0, v.sx), sy = Math.max(0, v.sy);
+    if (!sigCv) { sigCv = document.createElement('canvas'); sigCv.width = 96; sigCv.height = 16; }
+    var ctx = sigCv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(video, sx, sy, Math.max(1, Math.min(vw - sx, v.sw)), Math.max(1, Math.min(vh - sy, v.sh)), 0, 0, 96, 16);
+    var d = ctx.getImageData(0, 0, 96, 16).data;
+    var out = new Uint8Array(96 * 16);
+    for (var i = 0, p = 0; i < d.length; i += 4, p++) out[p] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+    return out;
   }
 
   async function scanOnce() {
@@ -534,7 +562,8 @@
     if (!stream) { toast('Die Kamera ist nicht aktiv. Tippe den Namen ein.'); return; }
     busy = true;
     $('#scanBtn').disabled = true;
-    setStatus('Lese Karte …');
+    setStatus('Lese Karte …', 0);
+    while (autoBusy) await sleep(60);
     try {
       var w = await getWorker();
       var best = 0, bestList = [], lastText = '';
@@ -542,7 +571,6 @@
       for (var i = 0; i < modes.length; i++) {
         var cv = captureTitle(modes[i]);
         if (!cv) { setStatus('Die Kamera ist noch nicht bereit. Gleich nochmal versuchen.'); return; }
-        if (i === 0) showThumb(cv);
         var res = await w.recognize(cv);
         lastText = (res.data.text || '').trim();
         var list = Core.matchText(INDEX, lastText);
@@ -554,12 +582,69 @@
         return;
       }
       setStatus('');
+      armGuard();
       openResult(bestList, best);
     } catch (e) {
       setStatus(e.message || 'Beim Lesen ist ein Fehler aufgetreten.');
     } finally {
       busy = false;
       $('#scanBtn').disabled = !activeSets().length;
+    }
+  }
+
+  /* ---------- Automatisches Erkennen ---------- */
+  var autoBusy = false, autoPrev = null, autoRef = null, autoNeedChange = false, autoFails = 0, autoTimer = null;
+  var autoConfirm = Core.createConfirmer(2);
+
+  function autoActive() {
+    return !!S.settings.auto && tab === 'scan' && !!stream && !busy && !R && !E && !CK &&
+      $('#manualBox').hidden && !document.hidden && activeSets().length > 0 && video.videoWidth > 0;
+  }
+  /** Nach einem Treffer erst wieder auslösen, wenn eine andere Karte im Kasten liegt. */
+  function armGuard() {
+    autoRef = captureSig();
+    autoNeedChange = !!autoRef;
+    autoConfirm.reset();
+    autoFails = 0;
+  }
+  function autoSchedule(ms) { clearTimeout(autoTimer); autoTimer = setTimeout(autoTick, ms); }
+  async function autoTick() {
+    if (!autoActive() || autoBusy) { autoPrev = null; autoSchedule(500); return; }
+    autoBusy = true;
+    var wait = 220;
+    try {
+      var sig = captureSig();
+      if (!sig) { wait = 400; return; }
+      var moved = autoPrev ? Core.sigDiff(sig, autoPrev) : 0;
+      autoPrev = sig;
+      if (autoNeedChange) {
+        if (Core.sigDiff(sig, autoRef) > 22) { autoNeedChange = false; autoConfirm.reset(); }
+        else { wait = 500; return; }
+      }
+      if (Core.sigSd(sig) < 9 || moved > 30) { autoConfirm.reset(); autoFails = 0; return; }
+      wait = 300;
+      var w = await getWorker();
+      if (!autoActive()) return;
+      var cv = captureTitle(autoFails % 2 ? 'gray' : 'bin');
+      if (!cv) return;
+      var res = await w.recognize(cv);
+      if (!autoActive()) return;
+      var list = Core.matchText(INDEX, res.data.text || '');
+      var top = list[0];
+      if (top && top.s >= Core.autoMin(top.c.n)) {
+        setStatus('Erkenne: ' + (top.c.de || top.c.n) + ' …', 2500);
+        if (autoConfirm.push(Core.norm(top.c.n))) {
+          armGuard();
+          setStatus('');
+          openResult(list, top.s);
+        }
+      } else { autoConfirm.reset(); autoFails++; }
+    } catch (e) {
+      wait = 1500;
+      setStatus(e.message || 'Fehler bei der Texterkennung.');
+    } finally {
+      autoBusy = false;
+      autoSchedule(wait);
     }
   }
 
@@ -598,13 +683,13 @@
     var owned = ownedQty(c.id);
     var low = R.conf < 0.72;
     var foilOk = Core.canFoil(c) && Core.canNonFoil(c);
-    var html = '<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-label="Erkannte Karte"><div class="grab"></div>';
+    var html = '<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-label="Erkannte Karte"><div class="grab"></div><div class="sheet-scroll">';
     if (low) html += '<div class="warn">Nicht sicher, ob das die richtige Karte ist. Prüfe den Namen oder wähle unten einen anderen Vorschlag.</div>';
     html += '<div class="sheet-top"><img class="cardimg" src="' + esc(bigImg(c)) + '" alt="' + esc(c.n) + '"><div>' +
       '<h2>' + esc(c.de || c.n) + '</h2>' + (c.de ? '<div class="sub">' + esc(c.n) + '</div>' : '') +
       '<div class="mono sub">' + esc(c.s.toUpperCase()) + ' · ' + esc(c.cn) + ' · ' + esc(RARITY[c.r] || '') + '</div>' +
       '<div class="price">' + (p == null ? 'kein Preis' : money(p)) + '</div>' +
-      '<div class="sub">' + (R.foil ? 'Foil' : 'Normal') + ' · Cardmarket/Scryfall</div>' +
+      '<div class="sub">' + (R.foil ? 'Foil' : 'Normal') + ' · ' + (S.settings.cur === 'usd' ? 'TCGplayer' : 'Cardmarket') + '</div>' +
       '<div style="margin-top:8px"><button class="chip foil" data-act="resFoil" aria-pressed="' + R.foil + '"' + (foilOk ? '' : ' disabled') + '>Foil</button></div>' +
       (owned ? '<p class="owned">Schon ' + owned + '× in deiner Sammlung</p>' : '') +
       '</div></div>';
@@ -615,14 +700,13 @@
       }).join('') + '</div>';
     }
     if (R.groups.length > 1) {
-      html += '<div class="subtle">Andere Vorschläge</div><div class="alts">' + R.groups.slice(0, 6).map(function (x, i) {
+      html += '<div class="subtle">Andere Vorschläge</div><div class="chips">' + R.groups.slice(0, 6).map(function (x, i) {
         if (i === R.gi) return '';
         var cc = x.cards[0];
-        return '<button data-act="resGroup" data-i="' + i + '"><span>' + esc(cc.de || cc.n) + (cc.de ? ' <span class="sub">' + esc(cc.n) + '</span>' : '') +
-          '</span><span class="mono">' + Math.round(x.s * 100) + ' %</span></button>';
+        return '<button class="chip" data-act="resGroup" data-i="' + i + '">' + esc(cc.de || cc.n) + '</button>';
       }).join('') + '</div>';
     }
-    html += '<div class="acts2"><button class="btn" data-act="closeSheet">Verwerfen</button><button class="btn primary" data-act="resAdd">Zur Sammlung</button></div></div></div>';
+    html += '</div><div class="acts2"><button class="btn" data-act="closeSheet">Verwerfen</button><button class="btn primary" data-act="resAdd">Zur Sammlung</button></div></div></div>';
     openSheet(html);
   }
 
@@ -722,7 +806,7 @@
     var p = Core.priceOf(c, e.foil, S.settings.cur);
     var both = Core.canFoil(c) && Core.canNonFoil(c);
     var conds = ['NM', 'EX', 'GD', 'LP', 'PL', 'PO'];
-    openSheet('<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-label="Karte in der Sammlung"><div class="grab"></div>' +
+    openSheet('<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-label="Karte in der Sammlung"><div class="grab"></div><div class="sheet-scroll">' +
       '<div class="sheet-top"><img class="cardimg" src="' + esc(bigImg(c)) + '" alt="' + esc(c.n) + '"><div>' +
       '<h2>' + esc(c.de || c.n) + '</h2>' + (c.de ? '<div class="sub">' + esc(c.n) + '</div>' : '') +
       '<div class="mono sub">' + esc(c.s.toUpperCase()) + ' · ' + esc(c.cn) + ' · ' + esc(c.sn || '') + '</div>' +
@@ -731,7 +815,7 @@
       '<div style="margin-top:8px"><button class="chip foil" data-act="entFoil" aria-pressed="' + e.foil + '"' + (both ? '' : ' disabled') + '>Foil</button></div></div></div>' +
       '<div class="setting"><span>Anzahl</span><span class="stepper"><button data-act="entDec" aria-label="Eine weniger">−</button><output>' + e.qty + '</output><button data-act="entInc" aria-label="Eine mehr">+</button></span></div>' +
       '<div class="setting"><label for="cond">Zustand</label><select class="field" id="cond">' + conds.map(function (x) { return '<option' + (x === (e.cond || 'NM') ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div>' +
-      '<p class="hint">Der Zustand ist nur eine Notiz. Die Preise gelten für Karten in gutem Zustand (Near Mint) und werden nicht angepasst.</p>' +
+      '<p class="hint">Der Zustand ist nur eine Notiz. Die Preise gelten für Karten in gutem Zustand (Near Mint) und werden nicht angepasst.</p></div>' +
       '<div class="acts2"><button class="btn danger" data-act="entRemove">Entfernen</button><a class="btn" style="text-align:center;text-decoration:none" href="' + esc(c.uri || '#') + '" target="_blank" rel="noopener">Bei Scryfall öffnen</a></div></div></div>');
   }
 
@@ -753,8 +837,8 @@
     S.sets.forEach(function (s) {
       var load = LOAD.get(s.code);
       html += '<div class="card setrow"><div class="top"><b>' + esc(s.name) + '</b><span class="mono">' + esc(s.code.toUpperCase()) + '</span></div>' +
-        '<div class="hint">' + (load ? esc(load) : (s.count || 0) + ' Karten · Preise ' + ago(s.loadedAt)) + '</div>' +
-        (load ? '<div class="progress"><i></i></div>' : '<div class="acts"><button class="btn small" data-act="setRefresh" data-code="' + esc(s.code) + '">Preise aktualisieren</button>' +
+        '<div class="hint">' + (load ? esc(load) : (s.count || 0) + ' Karten · ' + ownedInSet(s.code) + ' in deiner Sammlung · Preise ' + ago(s.loadedAt)) + '</div>' +
+        (load ? '<div class="progress"><i></i></div>' : '<div class="acts"><button class="btn small primary" data-act="ckOpen" data-code="' + esc(s.code) + '">Checkliste</button><button class="btn small" data-act="setRefresh" data-code="' + esc(s.code) + '">Preise aktualisieren</button>' +
           '<button class="btn small danger" data-act="setRemove" data-code="' + esc(s.code) + '">Entfernen</button></div>') + '</div>';
     });
     if (S.sets.length > 1) html += '<p><button class="btn small" data-act="refreshAll">Alle Preise aktualisieren</button></p>';
@@ -782,6 +866,149 @@
     html += '<p class="hint" style="margin-top:20px">Preise und Kartendaten: Scryfall (Cardmarket in EUR, TCGplayer in USD). Sie werden dort einmal täglich aktualisiert und gelten für die englische Ausgabe.</p>';
     body.innerHTML = html;
     if (focused) { var el = $('#sq'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
+  }
+
+  /* ---------- Checkliste je Set ---------- */
+  var CK = null; // {code, name, cards, st, rar, q}
+  var CK_RAR = [['common', 'C'], ['uncommon', 'U'], ['rare', 'R'], ['mythic', 'M']];
+  function byNumber(a, b) {
+    var na = parseInt(a.cn, 10) || 0, nb = parseInt(b.cn, 10) || 0;
+    return na - nb || (a.cn < b.cn ? -1 : a.cn > b.cn ? 1 : 0);
+  }
+  function ownedInSet(code) {
+    var ids = {};
+    Object.keys(S.collection).forEach(function (k) {
+      var c = BYID.get(S.collection[k].id);
+      if (c && c.s === code) ids[c.id] = 1;
+    });
+    return Object.keys(ids).length;
+  }
+  function dropAll(id) { delete S.collection[ckey(id, false)]; delete S.collection[ckey(id, true)]; }
+  function ckFiltered() { return CK.st !== 'all' || !!CK.q.trim() || CK_RAR.some(function (r) { return CK.rar[r[0]]; }); }
+  function ckVisible() {
+    var nq = Core.norm(CK.q), num = CK.q.trim();
+    var rars = CK_RAR.map(function (r) { return r[0]; }).filter(function (r) { return CK.rar[r]; });
+    return CK.cards.filter(function (c) {
+      var own = ownedQty(c.id) > 0;
+      if (CK.st === 'own' && !own) return false;
+      if (CK.st === 'miss' && own) return false;
+      if (rars.length && rars.indexOf(c.r) < 0) return false;
+      if (nq && Core.norm((c.de || '') + ' ' + c.n).indexOf(nq) < 0 && c.cn !== num) return false;
+      return true;
+    });
+  }
+  function ckStats() {
+    var own = 0, val = 0;
+    CK.cards.forEach(function (c) {
+      var q = 0;
+      [false, true].forEach(function (f) {
+        var e = S.collection[ckey(c.id, f)];
+        if (!e) return;
+        q += e.qty;
+        var p = Core.priceOf(c, f, S.settings.cur);
+        if (p != null) val += p * e.qty;
+      });
+      if (q) own++;
+    });
+    return { own: own, total: CK.cards.length, val: val };
+  }
+  function ckCell(c) {
+    var q = ownedQty(c.id);
+    return '<button class="cell ' + (q ? 'own' : 'miss') + '" data-act="ckToggle" data-id="' + esc(c.id) + '" aria-pressed="' + (q > 0) + '" aria-label="' + esc(c.de || c.n) + '">' +
+      '<span class="cimg"><img src="' + esc(c.img || '') + '" alt="" loading="lazy"><span class="tick">✓</span>' + (q > 1 ? '<span class="qb">×' + q + '</span>' : '') + '</span>' +
+      '<span class="cap"><span class="mono">' + esc(c.cn) + '</span> ' + esc(c.de || c.n) + '</span></button>';
+  }
+  function openCheck(code) {
+    var s = getSet(code);
+    if (!s || !CARDS.has(code)) { toast('Dieses Set ist noch nicht geladen.'); return; }
+    CK = { code: code, name: s.name, cards: CARDS.get(code).slice().sort(byNumber), st: 'all', rar: {}, q: '' };
+    renderCheckShell();
+  }
+  function closeCheck() {
+    CK = null;
+    var h = $('#checkHost');
+    h.innerHTML = '';
+    h.hidden = true;
+    if (tab === 'sets') renderSets();
+  }
+  function renderCheckShell() {
+    var h = $('#checkHost');
+    h.hidden = false;
+    h.innerHTML =
+      '<div class="ck-head gut"><button class="btn small" data-act="ckBack">‹ Zurück</button><div class="ck-title"><b>' + esc(CK.name) + '</b><span class="mono" id="ckSub"></span></div></div>' +
+      '<div class="ck-tools gut"><input class="field" id="ckq" type="search" placeholder="Name oder Nummer suchen" autocomplete="off" autocapitalize="off" spellcheck="false"><div class="chips" id="ckChips"></div></div>' +
+      '<p class="hint ck-hint gut" id="ckHint" hidden>Tipp: Unten „Alle markieren“ tippen, dann die Karten antippen, die dir fehlen.</p>' +
+      '<div class="ck-scroll gut" id="ckScroll"><div class="ck-grid" id="ckGrid"></div></div>' +
+      '<div class="ck-bar gut"><span class="hint" id="ckVis"></span><div class="ck-bar-btns"><button class="btn small primary" id="ckAllBtn" data-act="ckAll">Alle markieren</button><button class="btn small" id="ckNoneBtn" data-act="ckNone">Alle abwählen</button></div></div>';
+    renderCheckGrid(false);
+  }
+  function ckHeader() {
+    var st = ckStats();
+    $('#ckSub').textContent = st.own + ' von ' + st.total + ' · ' + money(st.val);
+    return st;
+  }
+  function renderCheckGrid(keep) {
+    var sc = $('#ckScroll');
+    var top = sc.scrollTop || 0;
+    var vis = ckVisible();
+    var st = ckHeader();
+    $('#ckChips').innerHTML = [['all', 'Alle'], ['own', 'Habe'], ['miss', 'Fehlt']].map(function (x) {
+      return '<button class="chip" data-act="ckSt" data-v="' + x[0] + '" aria-pressed="' + (CK.st === x[0]) + '">' + x[1] + '</button>';
+    }).join('') + CK_RAR.map(function (r) {
+      return '<button class="chip" data-act="ckRar" data-v="' + r[0] + '" aria-pressed="' + (!!CK.rar[r[0]]) + '">' + r[1] + '</button>';
+    }).join('');
+    $('#ckGrid').innerHTML = vis.length ? vis.map(ckCell).join('') : '<p class="empty">Keine Karten für diesen Filter.</p>';
+    var f = ckFiltered();
+    $('#ckAllBtn').textContent = f ? 'Sichtbare markieren' : 'Alle markieren';
+    $('#ckNoneBtn').textContent = f ? 'Sichtbare abwählen' : 'Alle abwählen';
+    $('#ckVis').textContent = vis.length + ' angezeigt';
+    $('#ckHint').hidden = !(st.own === 0 && !f);
+    sc.scrollTop = keep ? top : 0;
+  }
+  function ckUpdateCell(id) {
+    var grid = $('#ckGrid');
+    var el = grid && grid.querySelector('[data-id="' + id + '"]');
+    var c = BYID.get(id);
+    if (el && c) el.outerHTML = ckCell(c);
+  }
+  function ckToggle(id) {
+    var c = BYID.get(id);
+    if (!c) return;
+    var q = ownedQty(id);
+    if (q > 0) {
+      var copy = [false, true].map(function (f) { var e = S.collection[ckey(id, f)]; return e ? Object.assign({}, e) : null; });
+      dropAll(id);
+      save(); recordHistory(null);
+      if (q > 1) {
+        toast((c.de || c.n) + ' (' + q + '×) entfernt', { label: 'Rückgängig', fn: function () {
+          copy.forEach(function (e) { if (e) S.collection[ckey(e.id, e.foil)] = e; });
+          save(); recordHistory(null);
+          if (CK) { ckUpdateCell(id); ckHeader(); }
+        } });
+      }
+    } else addCard(c, !Core.canNonFoil(c), 1);
+    ckUpdateCell(id);
+    ckHeader();
+  }
+  function ckBulk(on) {
+    var vis = ckVisible();
+    var todo = vis.filter(function (c) { return on ? !ownedQty(c.id) : ownedQty(c.id) > 0; });
+    if (!todo.length) { toast(on ? 'Alle angezeigten Karten sind schon markiert.' : 'Keine markierte Karte angezeigt.'); return; }
+    if (!on && todo.length > 20 && !window.confirm(todo.length + ' Karten aus der Sammlung nehmen?')) return;
+    var snap = JSON.stringify(S.collection);
+    todo.forEach(function (c) {
+      if (on) {
+        var foil = !Core.canNonFoil(c);
+        S.collection[ckey(c.id, foil)] = { id: c.id, foil: foil, qty: 1, cond: 'NM', at: Date.now() };
+      } else dropAll(c.id);
+    });
+    save(); recordHistory(null);
+    renderCheckGrid(true);
+    toast(todo.length + (on ? ' Karten markiert' : ' Karten abgewählt'), { label: 'Rückgängig', fn: function () {
+      S.collection = JSON.parse(snap);
+      save(); recordHistory(null);
+      if (CK) renderCheckGrid(true);
+    } });
   }
 
   /* ---------- Export / Import ---------- */
@@ -910,6 +1137,13 @@
     },
     cur: function (t) { S.settings.cur = t.dataset.v; save(); renderSets(); },
     multi: function () { S.settings.multi = !S.settings.multi; save(); renderSets(); },
+    ckOpen: function (t) { openCheck(t.dataset.code); },
+    ckBack: function () { closeCheck(); },
+    ckSt: function (t) { if (CK) { CK.st = t.dataset.v; renderCheckGrid(false); } },
+    ckRar: function (t) { if (CK) { CK.rar[t.dataset.v] = !CK.rar[t.dataset.v]; renderCheckGrid(false); } },
+    ckToggle: function (t) { if (CK) ckToggle(t.dataset.id); },
+    ckAll: function () { if (CK) ckBulk(true); },
+    ckNone: function () { if (CK) ckBulk(false); },
     exportJson: exportJson,
     exportCsv: exportCsv,
     importJson: function () { $('#importFile').click(); }
@@ -917,6 +1151,8 @@
 
   function setManual(on) {
     $('#manualBox').hidden = !on;
+    $('#view-scan').classList.toggle('typing', on);
+    if (!on) armGuard();
     $('#manualBtn').setAttribute('aria-pressed', on ? 'true' : 'false');
     if (on) { $('#q').focus(); renderSuggest(); }
   }
@@ -932,6 +1168,7 @@
     if (e.target.id === 'q') renderSuggest();
     else if (e.target.id === 'cq') { collFilter.q = e.target.value; renderCollList(); }
     else if (e.target.id === 'sq') { setQ = e.target.value; renderSets(); if (!SETLIST) ensureSetList(); }
+    else if (e.target.id === 'ckq' && CK) { CK.q = e.target.value; renderCheckGrid(false); }
   });
   document.addEventListener('change', function (e) {
     if (e.target.id === 'csort') { S.settings.sort = e.target.value; save(); renderCollList(); }
@@ -939,13 +1176,20 @@
     else if (e.target.id === 'importFile' && e.target.files[0]) { importJson(e.target.files[0]); e.target.value = ''; }
   });
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && $('#sheetHost').innerHTML) closeSheet();
+    if (e.key === 'Escape') { if ($('#sheetHost').innerHTML) closeSheet(); else if (CK) closeCheck(); }
     if (e.key === 'Enter' && e.target.id === 'q') {
       var first = Core.searchName(INDEX, e.target.value, 1)[0];
       if (first) pickSuggestion(first.c.id);
     }
   });
   $('#scanBtn').addEventListener('click', scanOnce);
+  $('#autoBtn').addEventListener('click', function () {
+    S.settings.auto = !S.settings.auto;
+    save();
+    $('#autoBtn').setAttribute('aria-pressed', S.settings.auto ? 'true' : 'false');
+    setStatus(readyHint(), 4000);
+    armGuard();
+  });
   cam.addEventListener('click', function (e) { if (!e.target.closest('button')) scanOnce(); });
   $('#manualBtn').addEventListener('click', function () { setManual($('#manualBox').hidden); });
   $('#foilBtn').addEventListener('click', function () {
@@ -954,12 +1198,29 @@
   });
   document.addEventListener('visibilitychange', syncCamera);
   window.addEventListener('pagehide', function () { DB.set('state', S).catch(function () {}); });
-  window.addEventListener('resize', drawOverlay);
+  /** App-Höhe an den wirklich sichtbaren Bereich koppeln (Browserleisten, Tastatur). */
+  function fitViewport() {
+    var vv = window.visualViewport;
+    if (!vv) return;
+    var root = document.documentElement;
+    root.style.setProperty('--app-h', Math.round(vv.height) + 'px');
+    root.style.setProperty('--app-top', Math.round(vv.offsetTop) + 'px');
+    $('#app').classList.toggle('kbd', vv.height < window.innerHeight - 140);
+    drawOverlay();
+  }
+  window.addEventListener('resize', fitViewport);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', fitViewport);
+    window.visualViewport.addEventListener('scroll', fitViewport);
+  }
+  document.addEventListener('focusout', function () { setTimeout(function () { if (window.scrollTo) window.scrollTo(0, 0); }, 60); });
   if (window.ResizeObserver) new ResizeObserver(drawOverlay).observe(cam);
 
   /* ---------- Start ---------- */
   (async function init() {
     await loadAll();
+    fitViewport();
+    autoSchedule(800);
     if (!S.sets.length) tab = 'scan';
     setTab('scan');
     renderScanUI();

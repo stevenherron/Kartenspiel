@@ -198,11 +198,48 @@
     return th;
   }
 
+  /** Mittlere absolute Abweichung zweier gleich langer Graubild-Signaturen (0 bis 255). */
+  function sigDiff(a, b) {
+    if (!a || !b || a.length !== b.length) return 255;
+    var s = 0;
+    for (var i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+    return s / a.length;
+  }
+
+  /** Streuung der Helligkeit. Ist sie klein, ist kein Text im Kasten. */
+  function sigSd(a) {
+    if (!a || !a.length) return 0;
+    var m = 0, i;
+    for (i = 0; i < a.length; i++) m += a[i];
+    m /= a.length;
+    var v = 0;
+    for (i = 0; i < a.length; i++) v += (a[i] - m) * (a[i] - m);
+    return Math.sqrt(v / a.length);
+  }
+
+  /** Meldet true, sobald derselbe Schluessel n-mal hintereinander kam. */
+  function createConfirmer(n) {
+    var last = null, cnt = 0;
+    return {
+      push: function (k) {
+        if (!k) { last = null; cnt = 0; return false; }
+        if (k === last) cnt++; else { last = k; cnt = 1; }
+        if (cnt >= n) { last = null; cnt = 0; return true; }
+        return false;
+      },
+      reset: function () { last = null; cnt = 0; }
+    };
+  }
+
+  /** Mindestaehnlichkeit fuers automatische Ausloesen. Kurze Namen verlangen mehr. */
+  function autoMin(name) { return norm(name).length <= 5 ? 0.92 : 0.82; }
+
   const api = {
     norm: norm, lev: lev, sim: sim, score: score, candidatesFromText: candidatesFromText,
     namesOf: namesOf, buildIndex: buildIndex, matchText: matchText, searchName: searchName,
     groupByName: groupByName, priceOf: priceOf, canFoil: canFoil, canNonFoil: canNonFoil,
-    guideRect: guideRect, titleRegion: titleRegion, toVideoRect: toVideoRect, otsu: otsu
+    guideRect: guideRect, titleRegion: titleRegion, toVideoRect: toVideoRect, otsu: otsu,
+    sigDiff: sigDiff, sigSd: sigSd, createConfirmer: createConfirmer, autoMin: autoMin
   };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.Core = api;
